@@ -1,0 +1,8 @@
+{
+  "name": "youhouplugin",
+  "version": "1.0.0",
+  "description": "抖音广告自动跳过 Chrome 插件",
+  "scripts": {
+    "generate-icons": "node generate-icons.js"
+  }
+}

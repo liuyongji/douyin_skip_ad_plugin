@@ -1,0 +1,481 @@
+// 抖音优化插件 - 主要内容脚本（参考油猴插件 V6.3.2 优化版）
+// 核心改进：收缩检测区域 + 排除侧边栏 + 精确关键词匹配
+
+(function() {
+  'use strict';
+
+  // ==========================================
+  //                全局配置参数
+  // ==========================================
+  const CONFIG = {
+    // 检测频率（毫秒）
+    checkInterval: 800,
+    // 跳过后的冷却时间（毫秒）
+    skipCooldown: 1500,
+    // 需要跳过的内容类型
+    skipTypes: {
+      ad: true,           // 广告
+      live: true,         // 直播
+      shopping: true,     // 购物/带货
+      promotion: true     // 推广
+    },
+    // 画质设置（保留功能）
+    qualities: ["超清 4K", "超清 2K", "高清 1080P"],
+    
+    // 关键改进：可视检测区域限制
+    viewportWidthRatio: 0.66,  // 只检测屏幕左侧 2/3 区域
+    
+    // 精确的关键词匹配规则
+    adKeywords: {
+      exact: ['广告'],  // 精确匹配
+      patterns: [/推广|赞助|立即 (了解 | 查看 | 领取 | 体验 | 下载 | 预约)|去看看|查看详情/]  // 正则匹配
+    },
+    liveKeywords: ['直播中', 'LIVE'],
+    shoppingKeywords: ['购物', '购买', '商品', '购物车', '同款', '下单', '售价', '¥'],
+    promotionKeywords: ['推广', '营销', '推荐'],
+    
+    // 精确的元素选择器（基于 data-e2e 和特定 class）
+    skipSelectors: {
+      ad: [
+        '[data-e2e="ad"]',
+        '[data-e2e="mix-ad"]'
+      ],
+      live: [
+        '[data-e2e="live"]'
+      ],
+      shopping: [
+        '[data-e2e="shopping"]',
+        '[data-e2e="video-cart-entry"]'  // 购物车入口
+      ]
+    },
+    
+    // 视频容器选择器
+    videoContainerSelector: '[data-e2e="feed-container"]',
+    // 划走动作延迟（毫秒）
+    swipeDelay: 600,
+    // 连续检测次数阈值
+    detectionThreshold: 1,  // 油猴插件使用单次检测，因为已经很精确了
+    // 视频变化检测延迟（毫秒）
+    videoChangeDelay: 2000,
+    // 元素尺寸限制（防止误判）
+    maxElementSize: {
+      ad: { width: 90, height: 40 },      // 广告标签通常很小
+      promotion: { width: 200, height: 60 },  // 推广文案限制
+      shopping: { width: 350, height: 100 }   // 购物链接限制
+    }
+  };
+
+  // ==========================================
+  //                全局状态变量
+  // ==========================================
+  let state = {
+    isEnabled: true,
+    currentVideoIndex: 0,
+    skippedCount: 0,
+    lastCheckTime: 0,
+    consecutiveDetections: 0,
+    lastVideoId: null,
+    isVideoChanging: false,
+    currentContentType: null,
+    isSkipping: false,          // 是否正在执行跳过动作
+    skipCooldownEnd: 0,         // 冷却结束时间
+    lastVideoSrc: '',           // 上一个视频源
+    isQualityChecked: false     // 画质是否已检查
+  };
+
+  /**
+   * 工具函数：模拟键盘方向键下按
+   */
+  function simulateKeyDown() {
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      code: 'ArrowDown',
+      keyCode: 40,
+      which: 40,
+      bubbles: true,
+      cancelable: true
+    });
+    document.dispatchEvent(event);
+    console.log('[抖音优化] 执行跳过');
+  }
+
+  /**
+   * 关键改进：元素是否在可视区域内（收缩至左侧 2/3）
+   * 侧边栏通常在右侧，这样可以物理隔离侧边栏干扰
+   */
+  function isElementInViewport(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    
+    const rect = el.getBoundingClientRect();
+    const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+    const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+    
+    return (
+      rect.top >= 0 && 
+      rect.bottom <= windowHeight &&
+      rect.left < windowWidth * CONFIG.viewportWidthRatio &&  // 只检测左侧 2/3
+      rect.width > 10 && 
+      rect.height > 10
+    );
+  }
+
+  /**
+   * 检查元素是否属于侧边栏（二次保险）
+   */
+  function isElementInSidebar(el) {
+    if (!el) return false;
+    
+    // 检查是否属于侧边栏容器
+    const sidebarSelectors = [
+      '[class*="drawer"]',
+      '[class*="sideslip"]',
+      '[class*="UserPanel"]',
+      '[class*="side"]',
+      '[class*="panel"]'
+    ];
+    
+    for (const selector of sidebarSelectors) {
+      if (el.closest(selector)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 获取当前视频的唯一标识
+   */
+  function getCurrentVideoId() {
+    const videoElement = document.querySelector('video');
+    const authorElement = document.querySelector('[data-e2e="userinfo"]');
+    
+    if (videoElement && authorElement) {
+      return `${authorElement.innerText}_${videoElement.currentTime.toFixed(0)}`;
+    }
+    
+    return window.location.href + '_' + Math.floor(Date.now() / 1000);
+  }
+
+  /**
+   * 检查视频是否发生了变化
+   */
+  function hasVideoChanged() {
+    const currentVideoId = getCurrentVideoId();
+    if (currentVideoId !== state.lastVideoId) {
+      state.lastVideoId = currentVideoId;
+      state.consecutiveDetections = 0;
+      state.currentContentType = null;
+      state.isVideoChanging = true;
+      
+      setTimeout(() => {
+        state.isVideoChanging = false;
+      }, CONFIG.videoChangeDelay);
+      
+      console.log('[抖音优化] 检测到视频切换，等待', CONFIG.videoChangeDelay / 1000, '秒');
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 执行跳过操作（带冷却机制）
+   */
+  function executeSkip(contentType) {
+    if (state.isSkipping || Date.now() < state.skipCooldownEnd) {
+      return false;  // 正在跳过或冷却中
+    }
+    
+    state.isSkipping = true;
+    state.currentContentType = contentType;
+    
+    console.log(`[抖音优化] 发现${contentType}内容，执行跳过`);
+    
+    // 模拟键盘方向键下按
+    simulateKeyDown();
+    
+    // 同时模拟滚轮滚动（辅助）
+    const scrollStep = window.innerHeight * 0.9;
+    window.scrollBy({
+      top: scrollStep,
+      left: 0,
+      behavior: 'smooth'
+    });
+
+    // 更新状态
+    state.skippedCount++;
+    state.consecutiveDetections = 0;
+    state.currentContentType = null;
+    state.skipCooldownEnd = Date.now() + CONFIG.skipCooldown;  // 设置冷却时间
+    
+    setTimeout(() => {
+      state.isSkipping = false;
+    }, CONFIG.skipCooldown);
+    
+    return true;
+  }
+
+  /**
+   * 核心检测函数：广告检测（参考油猴插件精确算法）
+   */
+  function detectAd() {
+    if (!CONFIG.skipTypes.ad) return false;
+    
+    // 方法 1: 检查精确的元素选择器
+    for (const selector of CONFIG.skipSelectors.ad) {
+      const element = document.querySelector(selector);
+      if (element && isElementInViewport(element) && !isElementInSidebar(element)) {
+        console.log('[抖音优化] 找到广告元素:', selector);
+        return executeSkip('ad');
+      }
+    }
+    
+    // 方法 2: 扫描页面上的按钮和文本标签
+    const buttons = document.querySelectorAll('button, a, div, span');
+    for (let i = 0; i < buttons.length; i++) {
+      const el = buttons[i];
+      
+      // 不在可视区域或属于侧边栏，跳过
+      if (!isElementInViewport(el) || isElementInSidebar(el)) {
+        continue;
+      }
+      
+      const text = (el.innerText || '').trim();
+      const cleanText = text.replace(/\s+/g, '');
+      
+      // 精确匹配「广告」标签（严格尺寸限制）
+      if (cleanText === '广告' && 
+          el.offsetWidth < CONFIG.maxElementSize.ad.width && 
+          el.offsetHeight < CONFIG.maxElementSize.ad.height) {
+        console.log('[抖音优化] 发现广告标签');
+        return executeSkip('ad');
+      }
+      
+      // 正则匹配推广行为（严格尺寸和长度限制）
+      if (text.length < 20 && 
+          el.offsetWidth < CONFIG.maxElementSize.promotion.width && 
+          el.offsetHeight < CONFIG.maxElementSize.promotion.height) {
+        for (const pattern of CONFIG.adKeywords.patterns) {
+          if (pattern.test(text)) {
+            console.log('[抖音优化] 发现广告行为:', text);
+            return executeSkip('ad');
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 核心检测函数：购物内容检测
+   */
+  function detectShopping() {
+    if (!CONFIG.skipTypes.shopping) return false;
+    
+    // 方法 1: 检查购物车入口
+    const cart = document.querySelector('[data-e2e="video-cart-entry"]');
+    if (cart && isElementInViewport(cart) && !isElementInSidebar(cart)) {
+      console.log('[抖音优化] 发现购物车入口');
+      return executeSkip('shopping');
+    }
+    
+    // 方法 2: XPath 查找购物相关文本
+    const xpath = "//*[contains(text(), '购物')]";
+    const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    
+    for (let i = 0; i < result.snapshotLength; i++) {
+      const el = result.snapshotItem(i);
+      
+      if (!isElementInViewport(el) || isElementInSidebar(el)) {
+        continue;
+      }
+      
+      const txt = el.innerText.trim();
+      const pTxt = el.parentElement ? el.parentElement.innerText.trim() : "";
+      
+      // 排除「购物车」字样（避免误判）
+      if (txt.includes("车") || pTxt.includes("车")) {
+        continue;
+      }
+      
+      const combinedText = txt + " " + pTxt;
+      
+      // 包含购物特征词
+      if (combinedText.includes('|') || 
+          combinedText.includes('销量') || 
+          combinedText.includes('评价') || 
+          combinedText.includes('同款') || 
+          combinedText.includes('推荐') || 
+          combinedText.includes('抢购')) {
+        
+        if (el.offsetWidth < CONFIG.maxElementSize.shopping.width && 
+            el.offsetHeight < CONFIG.maxElementSize.shopping.height &&
+            el.offsetParent !== null) {
+          console.log('[抖音优化] 发现购物链接');
+          return executeSkip('shopping');
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 核心检测函数：直播内容检测
+   */
+  function detectLive() {
+    if (!CONFIG.skipTypes.live) return false;
+    
+    // XPath 查找「直播中」
+    const xpath = "//*[text()='直播中']";
+    const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    
+    for (let i = 0; i < result.snapshotLength; i++) {
+      const el = result.snapshotItem(i);
+      
+      if (isElementInViewport(el) && 
+          !isElementInSidebar(el) && 
+          el.offsetParent !== null) {
+        console.log('[抖音优化] 发现直播中');
+        return executeSkip('live');
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 综合内容检测入口
+   */
+  function checkContent() {
+    // 冷却中或跳过中，不检测
+    if (state.isSkipping || Date.now() < state.skipCooldownEnd) {
+      return true;
+    }
+    
+    // 视频切换中，不检测
+    if (state.isVideoChanging) {
+      return false;
+    }
+    
+    // 按优先级检测：广告 > 购物 > 直播
+    if (detectAd()) {
+      return true;
+    }
+    
+    if (detectShopping()) {
+      return true;
+    }
+    
+    if (detectLive()) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * 执行划走动作（优化版）
+   */
+  function swipeUp() {
+    if (!state.currentContentType) {
+      state.currentContentType = 'unknown';
+    }
+    
+    console.log(`[抖音优化] 执行跳过操作（类型：${state.currentContentType}）`);
+    
+    // 方法 1: 模拟键盘方向键下按（最可靠）
+    const arrowDownEvent = new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      code: 'ArrowDown',
+      keyCode: 40,
+      which: 40,
+      bubbles: true,
+      cancelable: true
+    });
+    
+    document.dispatchEvent(arrowDownEvent);
+    
+    // 方法 2: 同时模拟滚轮滚动（辅助）
+    const scrollStep = window.innerHeight * 0.9;
+    window.scrollBy({
+      top: scrollStep,
+      left: 0,
+      behavior: 'smooth'
+    });
+
+    // 更新状态
+    state.skippedCount++;
+    state.consecutiveDetections = 0;
+    state.currentContentType = null;
+    state.retryCount = 0;
+    
+    console.log(`[抖音优化] 已跳过 ${state.skippedCount} 个${state.currentContentType || '内容'}`);
+  }
+
+  /**
+   * 主检测循环
+   */
+  function startDetection() {
+    console.log('[抖音优化] V6.3.2 参考版启动 - 跳过直播/广告/购物/推广');
+    console.log('[抖音优化] 检测区域：屏幕左侧', Math.round(CONFIG.viewportWidthRatio * 100), '%');
+    console.log('[抖音优化] 配置:', JSON.stringify(CONFIG.skipTypes, null, 2));
+    
+    // 初始延迟，等待页面完全加载
+    setTimeout(() => {
+      setInterval(() => {
+        // 首先检查是否在正确的页面
+        if (!window.location.href.includes('douyin.com')) {
+          return;
+        }
+        
+        // 执行内容检测
+        checkContent();
+        
+        state.lastCheckTime = Date.now();
+      }, CONFIG.checkInterval);
+    }, 2000);
+  }
+
+  /**
+   * 监听来自 background 的消息
+   */
+  function setupMessageListener() {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'toggleExtension') {
+        state.isEnabled = request.enabled;
+        console.log('[抖音广告跳过] 扩展已', state.isEnabled ? '启用' : '禁用');
+        sendResponse({ success: true });
+      } else if (request.action === 'getStatus') {
+        sendResponse({
+          enabled: state.isEnabled,
+          skippedCount: state.skippedCount
+        });
+      }
+      return true;
+    });
+  }
+
+  /**
+   * 初始化
+   */
+  function init() {
+    console.log('[抖音广告跳过] 插件初始化');
+    
+    // 设置消息监听
+    setupMessageListener();
+    
+    // 等待页面加载完成后开始检测
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(startDetection, 2000);
+      });
+    } else {
+      setTimeout(startDetection, 2000);
+    }
+  }
+
+  // 启动插件
+  init();
+})();
