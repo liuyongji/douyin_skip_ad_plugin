@@ -25,10 +25,32 @@
     // 关键改进：可视检测区域限制
     viewportWidthRatio: 0.66,  // 只检测屏幕左侧 2/3 区域
     
+    // 新增：右边栏检测区域（用于识别右侧有信息的视频）
+    rightSidebarCheck: {
+      enabled: true,        // 启用右侧检测
+      widthRatio: 0.15,     // 右侧 15% 区域
+      hasInteraction: true  // 检查是否有点赞/评论等交互元素
+    },
+    
+    // 新增：检测左下角是否被主动隐藏（清屏模式特征 - 广告判定依据）
+    bottomLeftHiddenCheck: {
+      enabled: true,  // 启用检测
+      selectors: [
+        '[class*="user-info"]',
+        '[class*="author-info"]',
+        '[class*="nickname"]',
+        '[class*="avatar"]'
+      ]
+    },
+    
     // 精确的关键词匹配规则
     adKeywords: {
       exact: ['广告'],  // 精确匹配
-      patterns: [/推广|赞助|立即 (了解 | 查看 | 领取 | 体验 | 下载 | 预约)|去看看|查看详情/]  // 正则匹配
+      patterns: [
+        /推广 | 赞助 | 立即 (了解 | 查看 | 领取 | 体验 | 下载 | 预约)|去看看|查看详情/,
+        /限时 | 抢购 | 特价 | 优惠 | 折扣 | 券后价 | 到手价/,
+        /[¥￥]\d+(\.\d+)?/  // 价格标识（如 ¥790）
+      ]
     },
     liveKeywords: ['直播中', 'LIVE'],
     shoppingKeywords: ['购物', '购买', '商品', '购物车', '同款', '下单', '售价', '¥'],
@@ -117,6 +139,90 @@
       rect.width > 10 && 
       rect.height > 10
     );
+  }
+
+  /**
+   * 新增：检查元素是否在右侧边栏区域
+   */
+  function isElementInRightSidebar(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    
+    const rect = el.getBoundingClientRect();
+    const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+    const rightBoundary = windowWidth * (1 - CONFIG.rightSidebarCheck.widthRatio);
+    
+    // 元素在右侧 15% 区域内
+    return rect.left >= rightBoundary;
+  }
+
+  /**
+   * 新增：检查右侧边栏是否有交互信息（点赞/评论/收藏等）
+   */
+  function hasRightSidebarInteraction() {
+    if (!CONFIG.rightSidebarCheck.enabled) return false;
+    
+    // 查找右侧边栏的交互元素
+    const interactionSelectors = [
+      '[class*="like"]',      // 点赞
+      '[class*="comment"]',   // 评论
+      '[class*="collect"]',   // 收藏
+      '[class*="share"]',     // 分享
+      '.interaction-bar',     // 交互栏
+      '[data-e2e*="bar"]'     // 各种 bar
+    ];
+    
+    for (const selector of interactionSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        if (isElementInRightSidebar(el)) {
+          // 检查是否有数字（表示有互动量）
+          const text = el.innerText || '';
+          if (/\d/.test(text)) {
+            return true;
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * 检测左下角信息是否被主动隐藏（清屏模式特征）
+   * 注意：不是我们去隐藏，而是检测创作者是否隐藏了左下角信息
+   */
+  function isBottomLeftHidden() {
+    if (!CONFIG.bottomLeftHiddenCheck.enabled) return false;
+    
+    let shouldHaveElements = 0;
+    let hiddenCount = 0;
+    
+    for (const selector of CONFIG.bottomLeftHiddenCheck.selectors) {
+      const elements = document.querySelectorAll(selector);
+      shouldHaveElements += elements.length;
+      
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        const rect = el.getBoundingClientRect();
+        const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+        const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+        
+        // 检查是否在左下角区域（底部 30%，左侧 30%）
+        if (rect.bottom >= windowHeight * 0.7 && rect.left < windowWidth * 0.3) {
+          // 检查是否被隐藏（透明度、display 等）
+          const style = window.getComputedStyle(el);
+          if (style.opacity === '0' || 
+              style.display === 'none' || 
+              style.visibility === 'hidden') {
+            hiddenCount++;
+          }
+        }
+      }
+    }
+    
+    // 如果应该有元素但都被隐藏了，说明是清屏模式
+    return shouldHaveElements > 0 && hiddenCount === shouldHaveElements;
   }
 
   /**
@@ -216,7 +322,7 @@
   }
 
   /**
-   * 核心检测函数：广告检测（参考油猴插件精确算法）
+   * 核心检测函数：广告检测（参考油猴插件精确算法 + 增强版）
    */
   function detectAd() {
     if (!CONFIG.skipTypes.ad) return false;
@@ -260,6 +366,27 @@
             console.log('[抖音优化] 发现广告行为:', text);
             return executeSkip('ad');
           }
+        }
+      }
+    }
+    
+    // 方法 3: 新增 - 检查右侧边栏是否有交互信息 + 左下角是否被隐藏（清屏模式）
+    // 如果右侧有点赞/评论等，且左下角被主动隐藏（清屏模式），判定为广告
+    if (hasRightSidebarInteraction() && isBottomLeftHidden()) {
+      console.log('[抖音优化] 右侧有交互 + 左下角被隐藏（清屏模式）');
+      return executeSkip('ad');
+    }
+    
+    // 方法 4: 仅右侧有交互，但包含明显广告关键词
+    if (hasRightSidebarInteraction()) {
+      // 检查视频中是否有广告关键词
+      const videoTitle = document.title || '';
+      const pageText = document.body.innerText;
+      
+      for (const pattern of CONFIG.adKeywords.patterns) {
+        if (pattern.test(videoTitle) || pattern.test(pageText)) {
+          console.log('[抖音优化] 右侧有交互 + 广告特征');
+          return executeSkip('ad');
         }
       }
     }
@@ -439,7 +566,32 @@
   }
 
   /**
-   * 监听来自 background 的消息
+   // 监听来自 popup 的消息
+   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+       if (request.action === 'settingsUpdated') {
+           console.log('[抖音优化] 设置已更新:', request.settings);
+           
+           // 更新全局配置
+           CONFIG.enabled = request.settings.enabled;
+           CONFIG.contentTypes.ad.enabled = request.settings.skipAd;
+           CONFIG.contentTypes.live.enabled = request.settings.skipLive;
+           CONFIG.contentTypes.shopping.enabled = request.settings.skipShopping;
+           CONFIG.contentTypes.promotion.enabled = request.settings.skipPromotion;
+           
+           // 如果插件被禁用，清除所有标记
+           if (!CONFIG.enabled) {
+               clearInterval(detectionTimer);
+               detectionTimer = null;
+               console.log('[抖音优化] 插件已禁用，停止检测');
+           } else if (!detectionTimer) {
+               // 如果插件被启用，重新启动检测
+               startDetection();
+           }
+           
+           sendResponse({ success: true });
+       }
+       return true;
+   });
    */
   function setupMessageListener() {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

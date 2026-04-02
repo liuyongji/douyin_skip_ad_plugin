@@ -4,16 +4,23 @@
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('[抖音优化] 扩展已安装/更新', details);
   
-  // 初始化存储
-  chrome.storage.local.set({
+  // 初始化存储 - 使用统一的设置对象
+  const defaultSettings = {
     enabled: true,
-    skippedCount: 0,
-    installTime: Date.now(),
-    skipConfig: {
-      ad: true,           // 跳过广告
-      live: true,         // 跳过直播
-      shopping: true,     // 跳过购物
-      promotion: true     // 跳过推广
+    skipLive: true,
+    skipAd: true,
+    skipShopping: true,
+    skipPromotion: true
+  };
+  
+  chrome.storage.local.get(['douyin_optimizer_settings'], (result) => {
+    if (!result.douyin_optimizer_settings) {
+      chrome.storage.local.set({
+        'douyin_optimizer_settings': defaultSettings,
+        'skippedCount': 0,
+        'installTime': Date.now()
+      });
+      console.log('[抖音优化] 已初始化默认设置');
     }
   });
 });

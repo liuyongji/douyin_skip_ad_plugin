@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "抖音优化 - 跳过直播广告购物",
-  "version": "3.0.0",
-  "description": "参考油猴插件 V6.3.2，智能跳过直播/广告/购物内容，收缩检测区域防止误判",
+  "version": "3.3.0",
+  "description": "智能跳过直播/广告/购物，支持弹窗设置总开关和子开关",
   "permissions": [
     "activeTab",
     "scripting",
@@ -12,6 +12,10 @@
     "https://www.douyin.com/*",
     "https://douyin.com/*"
   ],
+  "action": {
+      "default_popup": "popup.html",
+      "default_title": "抖音优化 - 设置"
+  },
   "content_scripts": [
     {
       "matches": [

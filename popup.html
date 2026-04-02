@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抖音优化 - 设置</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 320px;
+            padding: 15px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            color: white;
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            margin-bottom: 5px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        
+        .version {
+            background: rgba(255,255,255,0.2);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            display: inline-block;
+            margin-top: 5px;
+        }
+        
+        .settings-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+        
+        .setting-label {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .setting-desc {
+            font-size: 11px;
+            color: #999;
+            margin-top: 3px;
+        }
+        
+        /* 开关样式 */
+        .switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .3s;
+            border-radius: 26px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+        
+        /* 主开关样式 */
+        .main-switch .slider {
+            background-color: #e0e0e0;
+        }
+        
+        .main-switch input:checked + .slider {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        /* 状态指示 */
+        .status-indicator {
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .status-inactive {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        /* 分隔线 */
+        .divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 10px 0;
+        }
+        
+        .section-title {
+            font-size: 12px;
+            color: #999;
+            margin: 10px 0 5px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 抖音优化</h1>
+        <p>智能跳过直播/广告/购物内容</p>
+        <div class="version">v3.3.0</div>
+    </div>
+    
+    <div class="settings-panel">
+        <!-- 总开关 -->
+        <div class="setting-item main-switch">
+            <div>
+                <div class="setting-label">⚡ 插件总开关</div>
+                <div class="setting-desc">启用或禁用整个插件功能</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="masterSwitch">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <!-- 子开关 -->
+        <div class="section-title">功能控制</div>
+        
+        <div class="setting-item">
+            <div>
+                <div class="setting-label">📺 跳过直播</div>
+                <div class="setting-desc">自动跳过直播内容</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="liveSwitch">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="setting-item">
+            <div>
+                <div class="setting-label">📢 跳过广告</div>
+                <div class="setting-desc">自动跳过广告和推广内容</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="adSwitch">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="setting-item">
+            <div>
+                <div class="setting-label">🛒 跳过购物</div>
+                <div class="setting-desc">自动跳过带货视频</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="shoppingSwitch">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="setting-item">
+            <div>
+                <div class="setting-label">🏷️ 跳过推广</div>
+                <div class="setting-desc">自动跳过 promotional 内容</div>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="promotionSwitch">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+    
+    <div id="statusIndicator" class="status-indicator status-active">
+        ✅ 插件正在运行中
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
