@@ -102,7 +102,9 @@
     isSkipping: false,          // 是否正在执行跳过动作
     skipCooldownEnd: 0,         // 冷却结束时间
     lastVideoSrc: '',           // 上一个视频源
-    isQualityChecked: false     // 画质是否已检查
+    isQualityChecked: false,    // 画质是否已检查
+    isDetectionPaused: false,   // 检测是否暂停（用户按了上键）
+    detectionPauseEnd: 0        // 检测暂停结束时间
   };
 
   /**
@@ -285,6 +287,76 @@
   }
 
   /**
+   * 显示 Toast 通知
+   */
+  function showToast(message) {
+    // 创建 toast 元素
+    const toast = document.createElement('div');
+    toast.className = 'douyin-optimizer-toast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 25px;
+      font-size: 14px;
+      z-index: 999999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      animation: fadeInOut 3s ease-in-out;
+      pointer-events: none;
+    `;
+    toast.textContent = message;
+    
+    // 添加动画样式
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes fadeInOut {
+        0% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+        10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    // 添加到页面
+    document.body.appendChild(toast);
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 3000);
+  }
+
+  /**
+   * 监听键盘上键，暂停检测让用户重新观看
+   */
+  function setupKeyUpListener() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp' || e.code === 'ArrowUp') {
+        // 用户按下上键，暂停检测 10 秒
+        state.isDetectionPaused = true;
+        state.detectionPauseEnd = Date.now() + 10000; // 10秒后恢复检测
+        
+        console.log('[抖音优化] 检测到上键，暂停检测 10 秒');
+        showToast('已暂停检测，可以重新观看视频');
+        
+        // 10秒后自动恢复检测
+        setTimeout(() => {
+          state.isDetectionPaused = false;
+          console.log('[抖音优化] 检测已恢复');
+        }, 10000);
+      }
+    });
+  }
+
+  /**
    * 执行跳过操作（带冷却机制）
    */
   function executeSkip(contentType) {
@@ -296,6 +368,16 @@
     state.currentContentType = contentType;
     
     console.log(`[抖音优化] 发现${contentType}内容，执行跳过`);
+    
+    // 显示 Toast 通知
+    const typeNames = {
+      ad: '广告',
+      live: '直播',
+      shopping: '购物',
+      promotion: '推广'
+    };
+    const typeName = typeNames[contentType] || '内容';
+    showToast(`检测到${typeName}行为，执行跳过`);
     
     // 模拟键盘方向键下按
     simulateKeyDown();
@@ -481,6 +563,11 @@
       return true;
     }
     
+    // 检测被暂停（用户按了上键），不检测
+    if (state.isDetectionPaused || Date.now() < state.detectionPauseEnd) {
+      return true;
+    }
+    
     // 视频切换中，不检测
     if (state.isVideoChanging) {
       return false;
@@ -617,6 +704,9 @@
     
     // 设置消息监听
     setupMessageListener();
+    
+    // 设置上键监听（暂停检测）
+    setupKeyUpListener();
     
     // 等待页面加载完成后开始检测
     if (document.readyState === 'loading') {
